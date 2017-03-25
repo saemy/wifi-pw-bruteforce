@@ -9,7 +9,7 @@ Currently, the script is targeted to Android. You need to have ```bash```, and
 ```wpa_cli``` installed.
 
 
-Then, simply type:
+Then, simply type as **root**:
 ```
 wifi-pw-brutforce
 ```
