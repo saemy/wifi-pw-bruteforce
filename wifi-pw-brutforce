@@ -141,7 +141,7 @@ for pw in $pw_list; do
 				tput el
 			fi
 		fi
-	done
+	done <<< "$ssids"
 
 	debug ""
-done <<< "$ssids"
+done
