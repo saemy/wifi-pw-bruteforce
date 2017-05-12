@@ -109,6 +109,9 @@ for pw in $pw_list; do
 				# We found a valid password!
 				echo "    Found Valid password! $pw"
 				found_password=1
+
+				# No longer look for a password for this SSID.
+				ssids=$(echo "$ssids" | grep -xv "$ssid")
 				break
 				;;
 			DISCONNECTED|SCANNING)
