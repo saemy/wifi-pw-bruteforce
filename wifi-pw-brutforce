@@ -3,7 +3,8 @@
 
 pw_list="88888888 12345678 1234567890"
 
-DEBUG=1
+# Disables debug output if not requested otherwise.
+: ${DEBUG:=0}
 
 function debug() {
 	if [ "$DEBUG" == "1" ]; then
